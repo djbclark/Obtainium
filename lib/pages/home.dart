@@ -628,6 +628,56 @@ class _HomePageState extends State<HomePage> {
           await handleSettingsLink(uri);
         } else if (action == 'profile') {
           await handleProfileLink(uri);
+        } else if (action == 'appsettings') {
+          final headless = uri.queryParameters['headless'] == 'true' ||
+              uri.queryParameters['exit'] == 'true';
+          final path = uri.path.toLowerCase();
+          final appId = path.split('/').where((s) => s.isNotEmpty).join('/');
+          if (appId.isEmpty) {
+            throw ObtainiumError(tr('invalidInput'));
+          }
+          final settingsEncoded = uri.queryParameters['settings'];
+          if (settingsEncoded == null || settingsEncoded.isEmpty) {
+            throw ObtainiumError(tr('invalidInput'));
+          }
+          final settingsJson = utf8.decode(base64Url.decode(settingsEncoded));
+          final settingsMap = jsonDecode(settingsJson) as Map<String, dynamic>;
+
+          await waitUntil(
+            () => !appsProvider.loadingApps,
+            interval: const Duration(milliseconds: 10),
+            maxAttempts: 500,
+          );
+
+          final existing = appsProvider.apps[appId]?.app;
+          if (existing == null) {
+            throw ObtainiumError(tr('appNotFound'));
+          }
+
+          final merged = Map<String, dynamic>.from(existing.additionalSettings)
+            ..addAll(settingsMap.cast<String, dynamic>());
+          final updated = existing.copyWith(additionalSettings: merged);
+          await appsProvider.saveApps([updated]);
+
+          unawaited(
+            LogsProvider().add(
+              'Updated settings for ${existing.name}: $settingsJson',
+              level: LogLevel.info,
+            ),
+          );
+
+          if (mounted) {
+            showMessage(
+              '${tr('saved')}: ${existing.name}',
+              context,
+            );
+          }
+
+          if (headless) {
+            await maybeExit(uri, action: 'appSettings',
+                success: true, message: 'Updated ${existing.name}',
+                count: 1);
+          }
         } else {
           throw ObtainiumError(tr('unknown'));
         }
