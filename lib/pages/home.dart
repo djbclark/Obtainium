@@ -15,6 +15,7 @@ import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 import 'package:obtainium/providers/fleet_profile_applier.dart';
+import 'package:obtainium/providers/headless_result.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -234,11 +235,23 @@ class _HomePageState extends State<HomePage> {
       appsPageKey.currentState?.openAppById(appId);
     }
 
-    Future<void> maybeExit(Uri uri) async {
+    Future<void> maybeExit(Uri uri, {
+      required String action,
+      bool success = true,
+      String message = '',
+      int? count,
+    }) async {
       final headless = uri.queryParameters['headless'] == 'true' ||
           uri.queryParameters['exit'] == 'true';
       if (headless && mounted) {
-        // Give any message a moment to render before leaving the app.
+        unawaited(
+          HeadlessResult.write(
+            action: action,
+            success: success,
+            message: message,
+            count: count,
+          ),
+        );
         await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) {
           SystemNavigator.pop();
@@ -376,7 +389,7 @@ class _HomePageState extends State<HomePage> {
       }
 
       if (headless) {
-        await maybeExit(uri);
+        await maybeExit(uri, action: 'update');
       }
     }
 
@@ -437,7 +450,7 @@ class _HomePageState extends State<HomePage> {
       } else {
         throw ObtainiumError(tr('unknown'));
       }
-      await maybeExit(uri);
+      await maybeExit(uri, action: 'settings');
     }
 
     Future<void> handleProfileLink(Uri uri) async {
@@ -488,7 +501,8 @@ class _HomePageState extends State<HomePage> {
       }
 
       if (headless) {
-        await maybeExit(uri);
+        await maybeExit(uri, action: 'profile', message: result.message,
+            success: result.success, count: result.appliedCount);
       }
     }
 
@@ -533,6 +547,8 @@ class _HomePageState extends State<HomePage> {
           final dataStr = Uri.decodeComponent(data);
           final autoConfirm =
               uri.queryParameters['confirm'] == 'true';
+          final importHeadless = uri.queryParameters['headless'] == 'true' ||
+              uri.queryParameters['exit'] == 'true';
 
           if (!autoConfirm) {
             if (!context.mounted) return;
@@ -585,14 +601,26 @@ class _HomePageState extends State<HomePage> {
             'apps': action == 'app' ? <dynamic>[parsedData] : parsedData,
           });
           final result = await ap.import(importPayload);
+          final count = result.key.length;
+          unawaited(
+            LogsProvider().add(
+              'Imported $count apps via deep-link (headless: $importHeadless)',
+              level: count > 0 ? LogLevel.info : LogLevel.warning,
+            ),
+          );
           if (mounted) {
             showMessage(
               tr(
                 'importedX',
-                args: [plural('apps', result.key.length).toLowerCase()],
+                args: [plural('apps', count).toLowerCase()],
               ),
               context,
             );
+          }
+          if (importHeadless) {
+            await maybeExit(uri, action: 'import',
+                success: count > 0, message: 'Imported $count apps',
+                count: count);
           }
         } else if (action == 'update') {
           await handleUpdateLink(uri);
