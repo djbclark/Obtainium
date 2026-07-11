@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "name": "Obtainium fleet/headless default profile",
+    "description": "Recommended defaults for unattended fleet deployments (Shizuku + wireless ADB).",
+    "version": 1,
+    "clear_existing": false
+  },
+  "installMethod": "shizuku",
+  "enableBackgroundUpdates": true,
+  "bgUpdatesOnWiFiOnly": false,
+  "bgUpdatesWhileChargingOnly": false,
+  "updateInterval": 360,
+  "checkOnStart": true,
+  "parallelDownloads": true,
+  "includePrereleasesByDefault": false,
+  "groupBy": "category",
+  "pinUpdates": true,
+  "shizukuPretendToBeGooglePlay": false,
+  "beforeNewInstallsShareToAppVerifier": true
+}

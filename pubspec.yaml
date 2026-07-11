@@ -87,6 +87,7 @@ flutter:
   assets:
     - assets/translations/
     - assets/graphics/
+    - assets/fleet_profile_default.json
 
   fonts:
       - family: Montserrat
