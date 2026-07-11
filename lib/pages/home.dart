@@ -254,6 +254,8 @@ class _HomePageState extends State<HomePage> {
           uri.queryParameters['autoInstall'] == 'true' || isAll;
       final headless = uri.queryParameters['headless'] == 'true' ||
           (isAll && uri.queryParameters['headless'] != 'false');
+      final silentOnly = uri.queryParameters['silentOnly'] == 'true' ||
+          uri.queryParameters['silent'] == 'true';
       final specificIds =
           uri.queryParameters['appId']?.split(',').where((s) => s.isNotEmpty).toList();
 
@@ -262,6 +264,26 @@ class _HomePageState extends State<HomePage> {
         interval: const Duration(milliseconds: 10),
         maxAttempts: 500,
       );
+
+      Future<List<String>> _filterSilent(List<String> ids) async {
+        if (!silentOnly) return ids;
+        final results = await Future.wait(ids.map((id) async {
+          final appInMem = appsProvider.apps[id];
+          if (appInMem == null) return null;
+          final silent = await appsProvider.canInstallSilentlyInBackground(
+              appInMem.app);
+          if (!silent) {
+            unawaited(
+              LogsProvider().add(
+                'Skipping ${appInMem.app.name}: cannot install silently',
+                level: LogLevel.warning,
+              ),
+            );
+          }
+          return silent ? id : null;
+        }));
+        return results.whereType<String>().toList();
+      }
 
       if (!isAll && specificIds != null && specificIds.isNotEmpty) {
         final updates = await appsProvider
@@ -276,23 +298,27 @@ class _HomePageState extends State<HomePage> {
               return <App>[];
             });
         if (autoInstall && updates.isNotEmpty) {
-          unawaited(
-            appsProvider
-                .downloadAndInstallLatestApps(
-                  updates.map((a) => a.id).toList(),
-                  appNavigatorKey.currentContext,
-                  notificationsProvider: context.read<NotificationsProvider>(),
-                )
-                .catchError((e) {
-                  unawaited(
-                    LogsProvider().add(
-                      'Deep-link install failed: $e',
-                      level: LogLevel.error,
-                    ),
-                  );
-                  return <String>[];
-                }),
-          );
+          var installIds = updates.map((a) => a.id).toList();
+          installIds = await _filterSilent(installIds);
+          if (installIds.isNotEmpty) {
+            unawaited(
+              appsProvider
+                  .downloadAndInstallLatestApps(
+                    installIds,
+                    appNavigatorKey.currentContext,
+                    notificationsProvider: context.read<NotificationsProvider>(),
+                  )
+                  .catchError((e) {
+                    unawaited(
+                      LogsProvider().add(
+                        'Deep-link install failed: $e',
+                        level: LogLevel.error,
+                      ),
+                    );
+                    return <String>[];
+                  }),
+            );
+          }
         }
         if (mounted) {
           showMessage(
@@ -316,7 +342,8 @@ class _HomePageState extends State<HomePage> {
             });
 
         if (autoInstall) {
-          final ids = appsProvider.findAppIdsWithPendingUpdates(installedOnly: true);
+          var ids = appsProvider.findAppIdsWithPendingUpdates(installedOnly: true);
+          ids = await _filterSilent(ids);
           if (ids.isNotEmpty) {
             unawaited(
               appsProvider
