@@ -469,7 +469,7 @@ class _HomePageState extends State<HomePage> {
 
       if (encoded != null) {
         final json = utf8.decode(base64Url.decode(encoded));
-        result = FleetProfileApplier.applyJson(
+        result = await FleetProfileApplier.applyJson(
           settingsProvider,
           json: json,
           appsProvider: appsProvider,
@@ -477,7 +477,7 @@ class _HomePageState extends State<HomePage> {
       } else if (fileUrl != null) {
         final fileUri = Uri.parse(fileUrl);
         if (fileUri.scheme == 'file') {
-          result = FleetProfileApplier.applyFromFile(
+          result = await FleetProfileApplier.applyFromFile(
             settingsProvider,
             path: fileUri.toFilePath(),
             appsProvider: appsProvider,

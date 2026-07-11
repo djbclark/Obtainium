@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:obtainium/providers/apps_provider.dart';
+import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
+import 'package:shizuku_apk_installer/shizuku_apk_installer.dart';
 
 class FleetProfileResult {
   final bool success;
@@ -202,11 +205,18 @@ class FleetProfileApplier {
     'shizukuPretendToBeGooglePlay': _setShizukuPretendToBeGooglePlay,
   };
 
-  static FleetProfileResult applyJson(
+  /// Whether the profile has a `_meta.grantFirst` flag set.
+  static bool _grantFirst(Map<String, dynamic> profile) {
+    final meta = profile['_meta'];
+    if (meta is! Map) return false;
+    return meta['grantFirst'] == true;
+  }
+
+  static Future<FleetProfileResult> applyJson(
     SettingsProvider sp, {
     required String json,
     AppsProvider? appsProvider,
-  }) {
+  }) async {
     try {
       final parsed = jsonDecode(json);
       if (parsed is! Map) {
@@ -218,7 +228,7 @@ class FleetProfileApplier {
           message: 'Invalid profile format',
         );
       }
-      return applyMap(sp, parsed.cast<String, dynamic>(),
+      return await applyMap(sp, parsed.cast<String, dynamic>(),
           appsProvider: appsProvider);
     } catch (e) {
       return FleetProfileResult(
@@ -231,14 +241,42 @@ class FleetProfileApplier {
     }
   }
 
-  static FleetProfileResult applyMap(
+  static Future<FleetProfileResult> applyMap(
     SettingsProvider sp,
     Map<String, dynamic> profile, {
     AppsProvider? appsProvider,
-  }) {
+  }) async {
     final errors = <String>[];
     var applied = 0;
     var skipped = 0;
+    final grantFirst = _grantFirst(profile);
+
+    // If grantFirst is requested, try to grant Shizuku permission before
+    // setting installMethod. If it fails, skip installMethod.
+    bool? shizukuGranted;
+    if (grantFirst && profile['installMethod'] == 'shizuku') {
+      try {
+        final res = await ShizukuApkInstaller().checkPermission();
+        shizukuGranted = res?.startsWith('granted') ?? false;
+        if (!shizukuGranted) {
+          unawaited(
+            LogsProvider().add(
+              'Fleet profile: grantFirst enabled but Shizuku permission '
+                  'not granted ($res); skipping installMethod',
+              level: LogLevel.warning,
+            ),
+          );
+        }
+      } catch (e) {
+        unawaited(
+          LogsProvider().add(
+            'Fleet profile: grantFirst Shizuku check failed: $e',
+            level: LogLevel.warning,
+          ),
+        );
+        shizukuGranted = false;
+      }
+    }
 
     final keys = profile.keys.toList();
     for (final alias in keys) {
@@ -249,6 +287,16 @@ class FleetProfileApplier {
         skipped++;
         errors.add('Unknown setting: $alias');
         continue;
+      }
+
+      // Skip installMethod if grantFirst was requested but failed.
+      if (alias == 'installMethod' || alias == 'installerMode') {
+        if (grantFirst && shizukuGranted == false &&
+            profile[alias] == 'shizuku') {
+          skipped++;
+          errors.add('installMethod: Shizuku permission not granted');
+          continue;
+        }
       }
 
       try {
@@ -277,11 +325,11 @@ class FleetProfileApplier {
     );
   }
 
-  static FleetProfileResult applyFromFile(
+  static Future<FleetProfileResult> applyFromFile(
     SettingsProvider sp, {
     required String path,
     AppsProvider? appsProvider,
-  }) {
+  }) async {
     try {
       final file = File(path);
       if (!file.existsSync()) {
@@ -294,7 +342,7 @@ class FleetProfileApplier {
         );
       }
       final json = file.readAsStringSync();
-      return applyJson(sp, json: json, appsProvider: appsProvider);
+      return await applyJson(sp, json: json, appsProvider: appsProvider);
     } catch (e) {
       return FleetProfileResult(
         success: false,

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:obtainium/providers/apps_provider.dart';
 
 class HeadlessResult {
@@ -8,6 +9,9 @@ class HeadlessResult {
   final bool success;
   final String message;
   final int? count;
+  final int? updatedCount;
+  final int? failedCount;
+  final int? skippedCount;
   final DateTime timestamp;
 
   HeadlessResult({
@@ -15,6 +19,9 @@ class HeadlessResult {
     required this.success,
     required this.message,
     this.count,
+    this.updatedCount,
+    this.failedCount,
+    this.skippedCount,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
 
@@ -23,6 +30,9 @@ class HeadlessResult {
         'success': success,
         'message': message,
         if (count != null) 'count': count,
+        if (updatedCount != null) 'updatedCount': updatedCount,
+        if (failedCount != null) 'failedCount': failedCount,
+        if (skippedCount != null) 'skippedCount': skippedCount,
         'timestamp': timestamp.toIso8601String(),
       };
 
@@ -31,20 +41,41 @@ class HeadlessResult {
     required bool success,
     required String message,
     int? count,
+    int? updatedCount,
+    int? failedCount,
+    int? skippedCount,
   }) async {
+    final result = HeadlessResult(
+      action: action,
+      success: success,
+      message: message,
+      count: count,
+      updatedCount: updatedCount,
+      failedCount: failedCount,
+      skippedCount: skippedCount,
+    );
+
+    // Write headless_result.json for ADB/shell polling access.
     try {
       final dir = await getAppStorageDir();
-      final result = HeadlessResult(
-        action: action,
-        success: success,
-        message: message,
-        count: count,
-      );
       final file = File('${dir.path}/headless_result.json');
       await file.writeAsString(jsonEncode(result.toJson()));
-    } catch (_) {
-      // Best-effort: if we can't write, the orchestrator will see no file
-      // and know the previous run left no result.
-    }
+    } catch (_) {}
+
+    // Send broadcast intent for real-time fleet orchestration.
+    try {
+      await AndroidIntent(
+        action: 'dev.imranr.obtainium.action.HEADLESS_RESULT',
+        arguments: {
+          'action': action,
+          'success': success ? 'true' : 'false',
+          'message': message,
+          if (count != null) 'count': count.toString(),
+          if (updatedCount != null) 'updatedCount': updatedCount.toString(),
+          if (failedCount != null) 'failedCount': failedCount.toString(),
+          if (skippedCount != null) 'skippedCount': skippedCount.toString(),
+        },
+      ).sendBroadcast();
+    } catch (_) {}
   }
 }
