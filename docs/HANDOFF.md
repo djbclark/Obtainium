@@ -7,7 +7,7 @@ This is a fork of [ImranR98/Obtainium](https://github.com/ImranR98/Obtainium) at
 orchestration tools like [stayturgid](https://github.com/djbclark/stayturgid) can
 manage devices without fragile UI automation.
 
-**Latest release:** `v1.6.4` — see [GitHub Releases](https://github.com/djbclark/Obtainium/releases)
+**Latest release:** `v1.6.5` — see [GitHub Releases](https://github.com/djbclark/Obtainium/releases)
 for APK downloads.
 
 ---
@@ -21,7 +21,7 @@ for APK downloads.
 | `android/.../FleetProfileActivity.kt` | Exported, themeless native Activity — applies a JSON profile to `SharedPreferences` directly (no Flutter boot). Activated via `adb shell am start -a dev.imranr.obtainium.action.APPLY_FLEET_PROFILE` with `profile_path` extra or `file://`/`content://` URI. Returns `RESULT_OK`/`RESULT_CANCELED`, shows Toast. |
 | `android/.../FleetProfileApplier.kt` | Kotlin singleton `object`. Resolves 44+ key aliases + value aliases for enum settings (`theme: "dark"` → `2`, etc.). Writes bool/int/long/float/string/JSONArray to `context.getSharedPreferences(packageName + "_preferences")` — same store Flutter's `shared_preferences` plugin uses. |
 | `lib/providers/fleet_profile_applier.dart` | Dart-side applier with setter-method dispatch map. Used by the deep-link handler for full profile application including complex types (categories map, string lists). |
-| `lib/providers/headless_result.dart` | Writes `headless_result.json` to app storage on every headless exit. Orchestrators read via ADB/shell to confirm success. |
+| `lib/providers/headless_result.dart` | Writes `headless_result.json` **and** sends `HEADLESS_RESULT` broadcast intent on every headless exit. Orchestrators use either ADB/shell or a `BroadcastReceiver`. |
 | `assets/fleet_profile_default.json` | Bundled default profile (Shizuku installer, background updates, parallel downloads). |
 | `docs/FLEET_PROFILE.md` | Complete usage docs: quick start, profile format, key/value alias tables, deep-link actions, security notes, limitations. |
 
@@ -36,6 +36,10 @@ for APK downloads.
 | `profile` | `obtainium://profile?profile=<base64url-json>&headless=true` | `profile` (base64url), `url` (file://), `headless` |
 | `app`/`apps` | `obtainium://apps/<json>?confirm=true` | `confirm=true` bypasses import dialog |
 | `appSettings` | `obtainium://appSettings/<appId>?settings=<base64url-json>&headless=true` | `settings` (base64url-encoded JSON of additionalSettings to merge) |
+| | | **Fleet profile meta flags** |
+| | `_meta.grantFirst: true` | Try `ShizukuApkInstaller().checkPermission()` before setting `installMethod: "shizuku"`; skip if not granted |
+| | | **Broadcast on headless exit** |
+| | `dev.imranr.obtainium.action.HEADLESS_RESULT` | Sent with extras `action`, `success`, `message`, `count`, `updatedCount`, `failedCount`, `skippedCount` |
 
 ### Value alias system (Kotlin + Dart)
 
@@ -59,6 +63,7 @@ upstream Obtainium.
 |---------|-----|---------|-------------|
 | v1.6.3 | `v1.6.3` | Fleet profile system (native Activity, deep-links, docs) | `obtainium-v1.6.3-stayturgid-debug1-{abi}.apk` |
 | v1.6.4 | `v1.6.4` | Silent-only install, import feedback, per-app settings | `obtainium-v1.6.4-stayturgid-debug2-{abi}.apk` |
+| v1.6.5 | `v1.6.5` | Broadcast headless results, grantFirst for Shizuku | `obtainium-v1.6.5-stayturgid-debug3-{abi}.apk` |
 
 APK naming convention: `obtainium-v{version}-stayturgid-debug{n}-{abi}.apk`
 - `obtainium` — app name (upstream convention)
@@ -143,6 +148,14 @@ Fleet orchestration tool (adb / Termux / MDM)
 8. **Version lock** — A `settings/updates` deep-link could support a `lockVersion`
    parameter to pin all apps to their current versions during a fleet rollout.
 
+9. **Broadcast permissions** — The `HEADLESS_RESULT` broadcast uses a custom action
+   with no permission. If needed, add a signature-level permission to restrict which
+   apps can receive it.
+
+10. **grantFirst for native path** — The `grantFirst` flag currently only works in
+    the Flutter deep-link path. The native `FleetProfileActivity` cannot use the
+    Shizuku plugin. Consider adding a shell-based grant attempt as fallback.
+
 ### Build notes
 
 - Build requires JDK 21 (JDK 25 causes Gradle failure with "25.0.3" error)
@@ -170,6 +183,8 @@ Fleet orchestration tool (adb / Termux / MDM)
 | Enable/disable background update settings | Fleet profile: `"enableBackgroundUpdates": true` etc. |
 | Set categories | Fleet profile: `"groupBy": "category"` + `"categories": {"Automation": 1, "stayturgid": 2}` |
 | Tweak per-app APK filter / trackOnly | `obtainium://appSettings/<appId>?settings=<base64url-json>&headless=true` |
+| Receive headless result confirmation | Register `BroadcastReceiver` for `dev.imranr.obtainium.action.HEADLESS_RESULT` |
+| Set Shizuku installer + grant permission | Fleet profile: `{"_meta": {"grantFirst": true}, "installMethod": "shizuku"}` |
 
 ---
 
@@ -184,7 +199,8 @@ Fleet orchestration tool (adb / Termux / MDM)
 | `android/app/build.gradle.kts` | 135 | NDK version updated to locally-installed `29.0.14206865` |
 | `lib/pages/home.dart` | 880+ | Deep-link router + `handleUpdateLink`, `handleSettingsLink`, `handleProfileLink`, `handleAppSettings` |
 | `lib/providers/fleet_profile_applier.dart` | 310 | Dart-side applier with setter function dispatch map + value aliases |
-| `lib/providers/headless_result.dart` | 50 | Headless result JSON writer for orchestrator feedback |
+| `lib/providers/headless_result.dart` | 90 | Headless result file + broadcast intent sender |
+| `lib/providers/fleet_profile_applier.dart` | 340 | Async applyMap with `grantFirst` Shizuku permission flow |
 | `lib/providers/settings_provider.dart` | 768 | All settings getters/setters; `notifyListeners()` is protected (must use setters) |
 | `assets/fleet_profile_default.json` | 12 | Default fleet profile for unattended deployments |
 | `docs/FLEET_PROFILE.md` | 200+ | Full documentation |
