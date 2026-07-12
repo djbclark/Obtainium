@@ -167,8 +167,9 @@ object FleetProfileApplier {
 
     private fun applyProfile(context: Context, profile: JSONObject): Result {
         val errors = mutableListOf<String>()
+        // Must match Flutter shared_preferences plugin's SHARED_PREFERENCES_NAME.
         val prefs = context.getSharedPreferences(
-            context.packageName + "_preferences", Context.MODE_PRIVATE)
+            "FlutterSharedPreferences", Context.MODE_PRIVATE)
         val meta = profile.optJSONObject("_meta")
         val clearExisting = meta?.optBoolean("clear_existing", false) ?: false
 
