@@ -7,8 +7,74 @@ This is a fork of [ImranR98/Obtainium](https://github.com/ImranR98/Obtainium) at
 orchestration tools like [stayturgid](https://github.com/djbclark/stayturgid) can
 manage devices without fragile UI automation.
 
-**Latest release:** `v1.6.5` — see [GitHub Releases](https://github.com/djbclark/Obtainium/releases)
-for APK downloads.
+**Latest release:** `v1.6.5` (debug9) — see [GitHub Releases](https://github.com/djbclark/Obtainium/releases)
+
+---
+
+## Release naming & process
+
+### Convention
+
+Every release produces 4 APKs using this naming pattern:
+
+```
+obtainium-v{version}-stayturgid-debug{n}-{abi}.apk
+```
+
+| Component | Meaning | Example |
+|-----------|---------|---------|
+| `obtainium` | App name (upstream convention) | `obtainium` |
+| `v{version}` | Upstream version from `pubspec.yaml` | `v1.6.5` |
+| `stayturgid` | Fork marker differentiating from upstream | `stayturgid` |
+| `debug{n}` | **Sequential** debug build number | `debug9` |
+| `{abi}` | `arm64-v8a`, `armeabi-v7a`, `x86_64`, or `universal` | `arm64-v8a` |
+| `.apk` | Extension | `.apk` |
+
+**Full example:** `obtainium-v1.6.5-stayturgid-debug9-arm64-v8a.apk`
+
+### Debug build number rules
+
+- The `debug{n}` number is a **sequential counter per fork** — never reset per version.
+- Each time APKs are rebuilt (bug fix, new feature), increment `n`.
+- The current counter is `debug9` for v1.6.5. The next rebuild uses `debug10`.
+- Prior releases: v1.6.3 = `debug1`, v1.6.4 = `debug2`, v1.6.5 = `debug3` → `debug9`.
+- The tag (`v1.6.5`) is force-moved to the latest fix commit when rebuilding the same version.
+
+### Release process
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21
+
+# Clean and build split APKs + universal
+rm -rf build/ .dart_tool/
+flutter pub get
+flutter build apk --split-per-abi --flavor normal --release
+flutter build apk --flavor normal --release
+
+# Name APKs (edit APP_BUILD to next sequential number)
+APP_VERSION="1.6.5" APP_BUILD="10" DIR="build/app/outputs/flutter-apk"
+for abi in arm64-v8a armeabi-v7a x86_64; do
+  cp "$DIR/app-${abi}-normal-release.apk" \
+     "$DIR/obtainium-v${APP_VERSION}-stayturgid-debug${APP_BUILD}-${abi}.apk"
+done
+cp "$DIR/app-normal-release.apk" \
+   "$DIR/obtainium-v${APP_VERSION}-stayturgid-debug${APP_BUILD}-universal.apk"
+
+# Force-move tag, delete old release, create new one
+git add -A && git commit -m "..." && git push origin main
+git tag -f v1.6.5 HEAD && git push origin v1.6.5 --force
+gh release delete v1.6.5
+gh release create v1.6.5 --title "..." --notes "..." \
+  build/app/outputs/flutter-apk/obtainium-v1.6.5-stayturgid-debug10-*.apk
+```
+
+### Existing releases (draft=false)
+
+| Release | Tag | debug{n} | Content |
+|---------|-----|----------|---------|
+| v1.6.3 | `v1.6.3` | `debug1` | Fleet profile system (native Activity, deep-links, docs) |
+| v1.6.4 | `v1.6.4` | `debug2` | Silent-only install, import feedback, per-app settings |
+| v1.6.5 | `v1.6.5` | `debug9` | Broadcast results, grantFirst, result file, key prefix fixes |
 
 ---
 
@@ -18,94 +84,113 @@ for APK downloads.
 
 | File | Role |
 |------|------|
-| `android/.../FleetProfileActivity.kt` | Exported, themeless native Activity — applies a JSON profile to `SharedPreferences` directly (no Flutter boot). Activated via `adb shell am start -a dev.imranr.obtainium.action.APPLY_FLEET_PROFILE` with `profile_path` extra or `file://`/`content://` URI. Returns `RESULT_OK`/`RESULT_CANCELED`, shows Toast. |
-| `android/.../FleetProfileApplier.kt` | Kotlin singleton `object`. Resolves 44+ key aliases + value aliases for enum settings (`theme: "dark"` → `2`, etc.). Writes bool/int/long/float/string/JSONArray to `context.getSharedPreferences(packageName + "_preferences")` — same store Flutter's `shared_preferences` plugin uses. |
-| `lib/providers/fleet_profile_applier.dart` | Dart-side applier with setter-method dispatch map. Used by the deep-link handler for full profile application including complex types (categories map, string lists). |
-| `lib/providers/headless_result.dart` | Writes `headless_result.json` **and** sends `HEADLESS_RESULT` broadcast intent on every headless exit. Orchestrators use either ADB/shell or a `BroadcastReceiver`. |
-| `assets/fleet_profile_default.json` | Bundled default profile (Shizuku installer, background updates, parallel downloads). |
-| `docs/FLEET_PROFILE.md` | Complete usage docs: quick start, profile format, key/value alias tables, deep-link actions, security notes, limitations. |
+| `android/.../FleetProfileActivity.kt` (140 lines) | Exported, themeless native Activity. Reads a profile JSON from `profile_path` extra, `file://` URI, or `content://` URI. Writes result file (`obtainium-fleet-result.json`) alongside the profile. Returns `RESULT_OK`/`RESULT_CANCELED`. Supports `-e silent`, `-e result_path`, `-e deep_link`. |
+| `android/.../FleetProfileApplier.kt` (240 lines) | Kotlin singleton `object`. Resolves 44+ key aliases + value aliases for enum settings. Writes to `getSharedPreferences("FlutterSharedPreferences", ...)` using `SharedPreferences.Editor`. **Keys are prefixed with `"flutter."`** to match Flutter's `SharedPreferences` class default prefix. Result data class has `toJson()` for result file writing. |
+| `lib/providers/fleet_profile_applier.dart` (340 lines) | Dart-side async applier with setter-method dispatch map. Handles `grantFirst` Shizuku permission check. Used by `obtainium://profile` deep-link. |
+| `lib/providers/headless_result.dart` (90 lines) | Writes `headless_result.json` to app storage AND sends `dev.imranr.obtainium.action.HEADLESS_RESULT` broadcast intent with `action`/`success`/`message`/`count`/`updatedCount`/`failedCount`/`skippedCount` extras. |
+| `assets/fleet_profile_default.json` | Bundled default profile (Shizuku installer, background updates, parallel downloads, check-on-start). |
+| `docs/FLEET_PROFILE.md` | Complete docs: format, aliases, deep-link actions, security notes, scoped storage guidance. |
 
-### Deep-link actions (all in `lib/pages/home.dart`)
+### Native → Flutter wiring (critical — do not break)
 
-| Action | Example | Parameters |
-|--------|---------|------------|
-| `update` | `obtainium://update/all?autoInstall=true&headless=true` | `appId`, `forceAll`, `autoInstall`, `headless`/`exit`, `silentOnly`/`silent` |
-| `settings/installer` | `obtainium://settings/installer?mode=shizuku&headless=true` | `mode` |
+The native `FleetProfileApplier` writes preferences to `FlutterSharedPreferences.xml` using:
+```kotlin
+val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+val editor = prefs.edit()
+editor.putString("flutter.installMethod", "shizuku")  // ← NOTE the prefix
+editor.commit()
+```
+
+**Key details that were discovered through painful debugging:**
+
+1. **FlutterSharedPreferences name** — The Obtainium `SettingsProvider` uses `SharedPreferences.getInstance()` which hits the **legacy** `LegacySharedPreferencesPlugin` backend. That backend writes to and reads from `FlutterSharedPreferences.xml` (the XML file, NOT DataStore).
+
+2. **`flutter.` key prefix** — Flutter's `shared_preferences` Dart class (`shared_preferences.dart:22`) has a default prefix `'flutter.'`. So when Dart calls `prefs.getString('installMethod')`, it reads key `flutter.installMethod` from `FlutterSharedPreferences.xml`. The native applier MUST prefix all keys with `"flutter."`. This is done in `putValue()` via `val prefixedKey = FLUTTER_PREFIX + key`.
+
+3. **NOT DataStore** — The `SharedPreferencesPlugin.kt` also registers a DataStore backend (`preferencesDataStore("FlutterSharedPreferences")`), but the app's `SettingsProvider` uses the legacy path, which reads from the XML file. The native applier should NOT write to DataStore.
+
+### Deep-link actions (all in `lib/pages/home.dart` ~900 lines)
+
+| Action | Example URI | Key params |
+|--------|------------|------------|
+| `update` | `obtainium://update/all?autoInstall=true&headless=true&silentOnly=true` | `appId`, `forceAll`, `autoInstall`, `headless`/`exit`, `silentOnly`/`silent` |
+| `settings/installer` | `obtainium://settings/installer?mode=shizuku&headless=true` | `mode` (`system`/`shizuku`/`external`) |
 | `settings/background` | `obtainium://settings/background?enabled=true&wifiOnly=true` | `enabled`, `wifiOnly`, `chargingOnly` |
 | `settings/updates` | `obtainium://settings/updates?interval=720&checkOnStart=true` | `interval`, `checkOnStart`, `parallel` |
 | `profile` | `obtainium://profile?profile=<base64url-json>&headless=true` | `profile` (base64url), `url` (file://), `headless` |
-| `app`/`apps` | `obtainium://apps/<json>?confirm=true` | `confirm=true` bypasses import dialog |
-| `appSettings` | `obtainium://appSettings/<appId>?settings=<base64url-json>&headless=true` | `settings` (base64url-encoded JSON of additionalSettings to merge) |
-| | | **Fleet profile meta flags** |
-| | `_meta.grantFirst: true` | Try `ShizukuApkInstaller().checkPermission()` before setting `installMethod: "shizuku"`; skip if not granted |
-| | | **Broadcast on headless exit** |
-| | `dev.imranr.obtainium.action.HEADLESS_RESULT` | Sent with extras `action`, `success`, `message`, `count`, `updatedCount`, `failedCount`, `skippedCount` |
+| `app`/`apps` | `obtainium://apps/<json>?confirm=true&headless=true` | `confirm=true` bypasses import dialog |
+| `appSettings` | `obtainium://appSettings/<appId>?settings=<base64url-json>&headless=true` | `settings` (base64url JSON to merge into additionalSettings) |
 
-### Value alias system (Kotlin + Dart)
+### Fleet profile `_meta` flags
 
-Both the native `FleetProfileApplier` and the Dart applier support human-readable
-values for enum settings:
+| Flag | Description |
+|------|-------------|
+| `_meta.grantFirst: true` | Before setting `installMethod: "shizuku"`, calls `ShizukuApkInstaller().checkPermission()`. If Shizuku is already granted, applies normally. If not, skips `installMethod` setting with a warning. |
+| `_meta.clear_existing: true` | Clear all existing preferences before applying the profile. |
 
-| Setting | Aliases |
-|---------|---------|
+### Value alias system
+
+Both native (Kotlin) and Dart appliers support human-readable values for enum settings.
+Profiles can use `"theme": "dark"` instead of `"theme": 2`.
+
+| Setting | Aliases (→ stored value) |
+|---------|---------------------------|
 | `theme` | `"system"` (0), `"light"` (1), `"dark"` (2) |
 | `colourSchemeMode` | `"standard"` (0), `"vibrant"` (1), `"expressive"` (2), `"materialYou"` (3) |
 | `sortColumn` | `"added"` (0), `"nameAuthor"` (1), `"authorName"` (2), `"releaseDate"` (3) |
 | `sortOrder` | `"ascending"` (0), `"descending"` (1) |
 | `exportSettings` | `"disabled"` (0), `"enabled"` (1), `"overwrite"` (2) |
-
-### Releases published
-
-Both releases use a consistent naming convention that differentiates this fork from
-upstream Obtainium.
-
-| Release | Tag | Content | APK pattern |
-|---------|-----|---------|-------------|
-| v1.6.3 | `v1.6.3` | Fleet profile system (native Activity, deep-links, docs) | `obtainium-v1.6.3-stayturgid-debug1-{abi}.apk` |
-| v1.6.4 | `v1.6.4` | Silent-only install, import feedback, per-app settings | `obtainium-v1.6.4-stayturgid-debug2-{abi}.apk` |
-| v1.6.5 | `v1.6.5` | Broadcast headless results, grantFirst for Shizuku | `obtainium-v1.6.5-stayturgid-debug3-{abi}.apk` |
-
-APK naming convention: `obtainium-v{version}-stayturgid-debug{n}-{abi}.apk`
-- `obtainium` — app name (upstream convention)
-- `v{version}` — upstream version from pubspec.yaml
-- `stayturgid` — fork marker differentiating from upstream releases
-- `debug{n}` — sequential debug build number for this fork
-- `{abi}` — `arm64-v8a`, `armeabi-v7a`, `x86_64`, or `universal`
-
-APKs are built unsigned (no `key.properties`); signed with Android debug key.
+| `installMethod` | `"system"`, `"shizuku"`, `"external"` |
+| `groupBy` | `"none"`, `"category"`, `"source"` |
 
 ---
 
 ## Architecture
 
-### Data flow
+### Data flow (native path)
 
 ```
-Fleet orchestration tool (adb / Termux / MDM)
-  │
-  ├─ am start -a APPLY_FLEET_PROFILE -e profile_path /path/to/profile.json
-  │   └─ FleetProfileActivity (native, Theme.NoDisplay)
-  │       └─ FleetProfileApplier.applyFromPath() → write SharedPreferences
-  │       └─ (optional) startActivity(obtainium://...) for complex ops
-  │
-  └─ am start -d "obtainium://profile?profile=<base64>"
-      └─ Flutter app boots → app_links → interpretLink("profile")
-          └─ FleetProfileApplier.applyJson() → SettingsProvider setters
+adb push fleet.json /data/local/tmp/obtainium-fleet.json
+
+adb shell am start -W \
+  -a dev.imranr.obtainium.action.APPLY_FLEET_PROFILE \
+  -e profile_path /data/local/tmp/obtainium-fleet.json \
+  dev.imranr.obtainium/.FleetProfileActivity
+
+  └─ FleetProfileActivity.onCreate()
+       ├─ FleetProfileApplier.applyFromPath() → applyProfile()
+       │    └─ getSharedPreferences("FlutterSharedPreferences")
+       │       └─ editor.putString("flutter.installMethod", "shizuku")
+       │       └─ editor.commit()
+       ├─ writeResultFile() → /data/local/tmp/obtainium-fleet-result.json
+       ├─ setResult(RESULT_OK or RESULT_CANCELED)
+       └─ finish()
+
+adb shell cat /data/local/tmp/obtainium-fleet-result.json
+# → {"success":true,"appliedCount":3,"skippedCount":0,"errors":[],"message":"Applied 3..."}
 ```
 
-### Key decisions
+### Data flow (Flutter path)
 
-- **SharedPreferences store:** `context.getSharedPreferences(packageName + "_preferences")` —
-  verified against `shared_preferences_android` 2.4.26 source code (`SharedPreferencesBackend`
-  uses `PreferenceManager.getDefaultSharedPreferences()` which resolves to the same file).
-- **Native → Flutter relay:** The native activity writes directly to SharedPreferences for
-  performance; it does NOT need Flutter. For complex ops (imports, updates, categories maps),
-  pass `-e deep_link "obtainium://..."` or use the deep-link directly.
-- **Import auto-confirm:** `?confirm=true` on `obtainium://apps/<json>` bypasses the
-  confirmation dialog. Critical for stayturgid's headless catalog import.
-- **ABI naming:** `obtainium-v{version}-stayturgid-debug{n}-{abi}.apk`.
-  The `stayturgid` marker distinguishes this fork from upstream releases.
-  ABIs: `arm64-v8a`, `armeabi-v7a`, `x86_64`, `universal`.
+```
+adb shell am start \
+  -d "obtainium://profile?profile=<base64url>&headless=true"
+
+  └─ Flutter boots → app_links → interpretLink("profile")
+       └─ FleetProfileApplier.applyJson() → SettingsProvider setters
+       └─ HeadlessResult.write() → file + broadcast
+       └─ maybeExit() → SystemNavigator.pop()
+```
+
+### Key decisions & known pitfalls
+
+- **SharedPreferences store:** `getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)` — **NOT** `packageName + "_preferences"`.
+- **Key prefix:** All keys MUST be prefixed with `"flutter."` — Dart's `shared_preferences` class default prefix. The `FLUTTER_PREFIX` constant in `FleetProfileApplier.kt` handles this.
+- **Legacy path (not DataStore):** SettingsProvider uses the legacy `SharedPreferences.getInstance()` → `LegacySharedPreferencesPlugin` → XML file. Do not try to write to DataStore/protobuf.
+- **Profile location:** Use `/data/local/tmp/` (no scoped storage restrictions). Do NOT use `/sdcard/Download/` on Android 11+.
+- **Result verification:** The native activity writes `obtainium-fleet-result.json` alongside the profile. Use `-e result_path` to override. Use `am start -W` (wait flag) to block until the activity returns its exit code.
+- **APK naming:** `obtainium-v{version}-stayturgid-debug{n}-{abi}.apk`. `debug{n}` is sequential across all versions, never reset. All releases are `draft=false`.
+- **Build toolchain:** JDK 21 required (JDK 25 fails with "25.0.3" error). NDK `29.0.14206865`. No `key.properties` — APKs are unsigned.
 
 ---
 
@@ -113,56 +198,45 @@ Fleet orchestration tool (adb / Termux / MDM)
 
 ### Immediate gaps
 
-1. **Installer dialogs** — The `obtainium://update/all?autoInstall=true` path triggers
-   Obtainium's silent install (Shizuku), but if Shizuku is not granted or unavailable,
-   the system installer dialog appears. No deep-link mechanism can dismiss OS dialogs.
-   Workaround: ensure Shizuku is granted and `installMethod` is set to `"shizuku"` in
-   the fleet profile before triggering updates. The `silentOnly=true` param mitigates
-   this by filtering to only silently-installable apps.
+1. **Installer dialogs** — `obtainium://update/all?autoInstall=true` triggers Shizuku silent install. If Shizuku isn't granted or available, the system installer dialog appears. No deep-link can dismiss OS dialogs. Use `silentOnly=true` to pre-filter.
 
-2. **Play Protect** — Google Play Protect dialogs during install are an OS issue.
-   stayturgid currently handles these via UI automation (VLM/UI-TARS vision gating).
-   This cannot be replaced by deep links alone.
+2. **Play Protect** — OS-level dialog. stayturgid handles this via VLM/UI-TARS vision gating. Not fixable from Obtainium.
 
-3. **List settings** — `searchDeselected` (`List<String>`) is stored with a special
-   prefix (`JSON_LIST_PREFIX`) by Flutter's `shared_preferences` plugin. The native
-   applier stores it as a raw JSON string, which Flutter reads as `null` (falling back
-   to the default). Use the Flutter deep-link path if you need to set this.
+3. **List settings** — `searchDeselected` (`List<String>`) uses `JSON_LIST_PREFIX` encoding. The native applier stores it as a plain JSON string. Use the Flutter deep-link path for proper list encoding.
 
-4. **Categories as JSON map** — The native applier stores `categories` as a raw JSON
-   string, which Flutter reads correctly. The Dart applier handles it via
-   `SettingsProvider.setCategories()`. Both paths work.
+4. **Categories as JSON map** — Works correctly via both paths (stored as JSON string, parsed by SettingsProvider).
 
-5. **No iOS support** — Obtainium is Android-only. Fleet profile system is Android-only.
+5. **No iOS support** — Android-only.
 
 ### Enhancement ideas
 
-6. **Add `obtainium://repository` action** — Instead of importing full app catalogs,
-   allow pointing to a repository URL that Obtainium fetches periodically. This would
-   enable a "live catalog" pattern where the orchestrator updates a JSON file on a
-   web server and devices pick it up automatically.
+6. **`obtainium://repository` action** — Live catalog URL that Obtainium fetches periodically (pull-based fleet management).
 
-7. **Event-driven updates** — Add a webhook listener so the orchestrator can trigger
-   immediate updates instead of waiting for the 15-minute WorkManager interval.
+7. **Event-driven updates** — Webhook listener for immediate update triggers (bypass 15-min WorkManager interval).
 
-8. **Version lock** — A `settings/updates` deep-link could support a `lockVersion`
-   parameter to pin all apps to their current versions during a fleet rollout.
+8. **Version lock** — `lockVersion` param to pin all apps to current versions during fleet rollout.
 
-9. **Broadcast permissions** — The `HEADLESS_RESULT` broadcast uses a custom action
-   with no permission. If needed, add a signature-level permission to restrict which
-   apps can receive it.
+9. **Broadcast permissions** — `HEADLESS_RESULT` currently has no permission gate. Could add signature-level protection.
 
-10. **grantFirst for native path** — The `grantFirst` flag currently only works in
-    the Flutter deep-link path. The native `FleetProfileActivity` cannot use the
-    Shizuku plugin. Consider adding a shell-based grant attempt as fallback.
+10. **grantFirst for native path** — `grantFirst` only works in Flutter deep-link path (needs Shizuku plugin). Native activity can't call `checkPermission()`.
 
-### Build notes
+---
 
-- Build requires JDK 21 (JDK 25 causes Gradle failure with "25.0.3" error)
-- NDK `29.0.14206865` is installed locally; the `build.gradle.kts` was updated from
-  the original `28.2.13676358` which was not installed
-- No `key.properties` exists; release builds are unsigned
-- Build command: `JAVA_HOME=/opt/homebrew/opt/openjdk@21 flutter build apk --split-per-abi --flavor normal --release`
+## Build environment
+
+| Item | Value | Note |
+|------|-------|------|
+| JDK | `/opt/homebrew/opt/openjdk@21` | JDK 25 causes Gradle failure |
+| Flutter | `3.44.5` (Homebrew) | `.flutter` submodule is present but not used |
+| NDK | `29.0.14206865` | Changed from upstream `28.2.13676358` in `build.gradle.kts` |
+| Android SDK | `/Users/djbclark/Library/Android/sdk` | Build-tools 37.0.0, platforms android-37 |
+| Signing | None | No `key.properties` in repo; APKs built unsigned |
+| Java | `openjdk version 25.0.3` (system default) | Must set `JAVA_HOME` to JDK 21 for builds |
+
+**Build command:**
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 flutter build apk --split-per-abi --flavor normal --release
+```
 
 ---
 
@@ -170,47 +244,37 @@ Fleet orchestration tool (adb / Termux / MDM)
 
 | Project | Path | Role |
 |---------|------|------|
-| AutoJs6 | `~/src/AutoJs6` | Fleet profile pattern inspiration (`FleetProfileActivity`, `FleetProfileApplier`, `FLEET_PROFILE.md`) |
-| stayturgid | `~/src/stayturgid` | Fleet orchestration tool that consumes Obtainium's fleet profile + deep-link APIs. Currently uses UI automation; the goal is to replace UI taps with these declarative APIs. |
+| AutoJs6 | `~/src/AutoJs6` | Fleet profile pattern: `FleetProfileActivity`, `FleetProfileApplier`, `FLEET_PROFILE.md` |
+| stayturgid | `~/src/stayturgid` | Fleet orchestration consumer. Currently uses UI automation to manage Obtainium; goal is to replace with these declarative APIs. |
 
-### stayturgid ↔ Obtainium integration points
+### stayturgid ↔ Obtainium integration
 
 | stayturgid action (current) | Replacement (new) |
 |-----------------------------|-------------------|
-| Push catalog + tap "Continue" import dialog | `obtainium://apps/<json>?confirm=true` |
-| Open Settings → toggle Shizuku installer | Fleet profile: `"installMethod": "shizuku"` or `obtainium://settings/installer?mode=shizuku&headless=true` |
-| Tap bulk update button + handle installer | `obtainium://update/all?autoInstall=true&headless=true` (requires Shizuku; use `silentOnly=true` to skip non-silent apps) |
-| Enable/disable background update settings | Fleet profile: `"enableBackgroundUpdates": true` etc. |
-| Set categories | Fleet profile: `"groupBy": "category"` + `"categories": {"Automation": 1, "stayturgid": 2}` |
-| Tweak per-app APK filter / trackOnly | `obtainium://appSettings/<appId>?settings=<base64url-json>&headless=true` |
-| Receive headless result confirmation | Register `BroadcastReceiver` for `dev.imranr.obtainium.action.HEADLESS_RESULT` |
-| Set Shizuku installer + grant permission | Fleet profile: `{"_meta": {"grantFirst": true}, "installMethod": "shizuku"}` |
+| Push catalog + tap "Continue" | `obtainium://apps/<json>?confirm=true&headless=true` |
+| Settings → toggle Shizuku | Fleet profile: `"installMethod": "shizuku"` or `obtainium://settings/installer?mode=shizuku` |
+| Tap bulk update + handle dialogs | `obtainium://update/all?autoInstall=true&headless=true&silentOnly=true` |
+| Background update settings | Fleet profile: `"enableBackgroundUpdates": true`, `"bgUpdatesOnWiFiOnly": true` |
+| Set categories | Fleet profile: `"groupBy": "category"` + `"categories": {"Automation": 1}` |
+| Per-app APK filter / trackOnly | `obtainium://appSettings/<appId>?settings=<base64url>&headless=true` |
+| Verify headless result | `adb shell cat /data/local/tmp/obtainium-fleet-result.json` or `BroadcastReceiver` for `HEADLESS_RESULT` |
+| Set Shizuku + grant permission | Fleet profile: `{"_meta": {"grantFirst": true}, "installMethod": "shizuku"}` |
 
 ---
 
 ## Key files reference
 
-| File | Lines | What it does |
-|------|-------|-------------|
-| `android/.../FleetProfileActivity.kt` | 120 | Native entry point; reads JSON from intent/file/URI, delegates to applier, finishes |
-| `android/.../FleetProfileApplier.kt` | 240 | Kotlin singleton: alias maps, value resolution, typed SharedPreferences writes |
-| `android/.../AndroidManifest.xml` | 108 | Declares FleetProfileActivity with `APPLY_FLEET_PROFILE` action + file/content VIEW intent filters |
-| `android/.../MainActivity.kt` | 119 | Unchanged — share-to-deep-link bridge + external install method channel |
-| `android/app/build.gradle.kts` | 135 | NDK version updated to locally-installed `29.0.14206865` |
-| `lib/pages/home.dart` | 880+ | Deep-link router + `handleUpdateLink`, `handleSettingsLink`, `handleProfileLink`, `handleAppSettings` |
-| `lib/providers/fleet_profile_applier.dart` | 310 | Dart-side applier with setter function dispatch map + value aliases |
-| `lib/providers/headless_result.dart` | 90 | Headless result file + broadcast intent sender |
-| `lib/providers/fleet_profile_applier.dart` | 340 | Async applyMap with `grantFirst` Shizuku permission flow |
-| `lib/providers/settings_provider.dart` | 768 | All settings getters/setters; `notifyListeners()` is protected (must use setters) |
-| `assets/fleet_profile_default.json` | 12 | Default fleet profile for unattended deployments |
-| `docs/FLEET_PROFILE.md` | 200+ | Full documentation |
-| `pubspec.yaml` | 94 | Version `1.6.4`, fleet profile asset declared |
-
----
-
-## Contact / context
-
-- This fork is part of the stayturgid fleet orchestration ecosystem
-- The upstream repo is ImranR98/Obtainium — occasional upstream merges may be needed
-- All deep-link URIs are backward-compatible with the upstream version (new actions
-  `update`, `settings`, `profile`, `appSettings` and `confirm`/`silentOnly` params are additive)
+| File | Lines | Role |
+|------|-------|------|
+| `android/.../FleetProfileActivity.kt` | 140 | Native entry point; reads JSON, writes result file, returns exit code |
+| `android/.../FleetProfileApplier.kt` | 245 | Kotlin singleton: alias maps, value resolution, `flutter.`-prefixed SharedPreferences writes, `toJson()` |
+| `android/.../AndroidManifest.xml` | 108 | Declares `FleetProfileActivity` with `APPLY_FLEET_PROFILE` + file/content VIEW filters |
+| `android/.../MainActivity.kt` | 119 | Share-to-deep-link bridge + external install method channel (unchanged) |
+| `android/app/build.gradle.kts` | 135 | NDK `29.0.14206865`; no extra deps beyond `desugar_jdk_libs` |
+| `lib/pages/home.dart` | 930+ | Deep-link router: `handleUpdateLink`, `handleSettingsLink`, `handleProfileLink`, `interpretLink` (appSettings, profile, apps, update, settings) |
+| `lib/providers/fleet_profile_applier.dart` | 340 | Dart applier: async `applyMap` with `grantFirst`, `_resolveValue`, `FleetProfileResult` |
+| `lib/providers/headless_result.dart` | 90 | File + broadcast intent sender |
+| `lib/providers/settings_provider.dart` | 768 | Uses legacy `SharedPreferences.getInstance()` (NOT DataStore); all settings getters/setters |
+| `assets/fleet_profile_default.json` | 12 | Default profile |
+| `docs/FLEET_PROFILE.md` | 270+ | Full docs including scoped storage guidance |
+| `pubspec.yaml` | 94 | Version `1.6.5+2344`; Flutter `>=3.44.0` |
