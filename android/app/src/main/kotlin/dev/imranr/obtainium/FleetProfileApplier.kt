@@ -1,26 +1,37 @@
 package dev.imranr.obtainium
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.net.Uri
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
 /**
- * Applies a fleet/headless configuration profile to Obtainium's default
- * SharedPreferences.
+ * Must match SharedPreferencesPlugin.kt's DataStore name so the native
+ * applier writes to the same store that Flutter's shared_preferences reads.
+ */
+private val Context.fleetPreferencesDataStore by
+    preferencesDataStore("FlutterSharedPreferences")
+
+/**
+ * Applies a fleet/headless configuration profile to Obtainium's DataStore.
  *
- * This is the native analogue of the Dart-side FleetProfileApplier.
- * It handles simple preferences (bool, int, long, float, string).
- * For complex settings (List<String>, app imports, update triggers)
+ * Flutter's shared_preferences_android 2.4.26 plugin uses Jetpack DataStore
+ * (preferencesDataStore("FlutterSharedPreferences")) as its primary backend,
+ * NOT XML SharedPreferences. This applier writes to the same DataStore via
+ * the same extension property ([sharedPreferencesDataStore]) that the Flutter
+ * plugin uses, so settings are immediately visible to the Dart side.
+ *
+ * Handles simple preferences (bool, int/long, string). For complex settings
+ * (List<String> with JSON_LIST_PREFIX encoding, app imports, update triggers)
  * use the Flutter deep-link route (obtainium://profile?profile=...).
- *
- * Profiles are JSON objects mapping preference keys to typed values.
- *
- * Key aliases let you use short names instead of raw preference keys.
- * Value aliases let you use human-readable values for enum-like settings
- * (e.g. "theme": "dark" instead of "theme": 2).
  *
  * Example profile:
  * {
@@ -78,10 +89,6 @@ object FleetProfileApplier {
         "forcedLocale" to "forcedLocale",
     )
 
-    /**
-     * Human-readable value aliases for enum-like preference keys.
-     * Maps "key" -> { "human_value" -> stored_value }.
-     */
     private val valueAliasToKey: Map<String, Map<String, Any>> = mapOf(
         "installMethod" to mapOf(
             "system" to "system",
@@ -167,44 +174,42 @@ object FleetProfileApplier {
 
     private fun applyProfile(context: Context, profile: JSONObject): Result {
         val errors = mutableListOf<String>()
-        // Must match Flutter shared_preferences plugin's SHARED_PREFERENCES_NAME.
-        val prefs = context.getSharedPreferences(
-            "FlutterSharedPreferences", Context.MODE_PRIVATE)
         val meta = profile.optJSONObject("_meta")
         val clearExisting = meta?.optBoolean("clear_existing", false) ?: false
 
         var applied = 0
         var skipped = 0
 
-        val editor = prefs.edit()
-        if (clearExisting) {
-            editor.clear()
-        }
+        runBlocking {
+            context.fleetPreferencesDataStore.edit { prefs ->
+                if (clearExisting) {
+                    prefs.clear()
+                }
 
-        val keys = profile.keys()
-        while (keys.hasNext()) {
-            val rawKey = keys.next()
-            if (rawKey.startsWith("_")) continue
+                val keys = profile.keys()
+                while (keys.hasNext()) {
+                    val rawKey = keys.next()
+                    if (rawKey.startsWith("_")) continue
 
-            val prefKey = resolveKey(rawKey)
-            if (prefKey == null) {
-                skipped++
-                errors.add("Unknown key: $rawKey")
-                continue
+                    val prefKey = resolveKey(rawKey)
+                    if (prefKey == null) {
+                        skipped++
+                        errors.add("Unknown key: $rawKey")
+                        continue
+                    }
+
+                    try {
+                        val value = profile.get(rawKey)
+                        val resolvedValue = resolveValue(prefKey, value)
+                        putValue(prefs, prefKey, resolvedValue)
+                        applied++
+                    } catch (e: Exception) {
+                        skipped++
+                        errors.add("$rawKey: ${e.message}")
+                    }
+                }
             }
-
-            try {
-                val value = profile.get(rawKey)
-                val resolvedValue = resolveValue(prefKey, value)
-                putValue(editor, prefKey, resolvedValue)
-                applied++
-            } catch (e: Exception) {
-                skipped++
-                errors.add("$rawKey: ${e.message}")
-            }
         }
-
-        editor.commit()
 
         val message = "Applied $applied preferences, skipped $skipped" +
                 if (errors.isEmpty()) "" else " (${errors.size} errors)"
@@ -219,20 +224,29 @@ object FleetProfileApplier {
         return valueAliasToKey[prefKey]?.get(value) ?: value
     }
 
-    @Suppress("DEPRECATION")
-    private fun putValue(editor: SharedPreferences.Editor, key: String, value: Any?) {
+    private fun putValue(
+        prefs: MutablePreferences,
+        key: String,
+        value: Any?,
+    ) {
         when (value) {
-            is Boolean -> editor.putBoolean(key, value)
-            is String -> editor.putString(key, value)
-            is Int -> editor.putInt(key, value)
-            is Long -> editor.putLong(key, value)
-            is Double -> editor.putFloat(key, value.toFloat())
-            is Float -> editor.putFloat(key, value)
-            is JSONArray -> {
-                // Stored as JSON string; Flutter deep-link path handles List<String> encoding.
-                editor.putString(key, value.toString())
-            }
-            else -> throw IllegalArgumentException("Unsupported type: ${value?.javaClass?.simpleName}")
+            is Boolean -> prefs[booleanPreferencesKey(key)] = value
+            is String -> prefs[stringPreferencesKey(key)] = value
+            is Int -> prefs[longPreferencesKey(key)] = value.toLong()
+            is Long -> prefs[longPreferencesKey(key)] = value
+            is Double -> prefs[stringPreferencesKey(key)] =
+                DOUBLE_PREFIX + value.toString()
+            is Float -> prefs[stringPreferencesKey(key)] =
+                DOUBLE_PREFIX + value.toDouble().toString()
+            is JSONArray -> prefs[stringPreferencesKey(key)] = value.toString()
+            else -> throw IllegalArgumentException(
+                "Unsupported type: ${value?.javaClass?.simpleName}")
         }
     }
+
+    /**
+     * Must match SharedPreferencesPlugin.kt DOUBLE_PREFIX so that doubles
+     * stored by the native applier are decoded correctly by the Dart side.
+     */
+    private const val DOUBLE_PREFIX = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBEb3VibGUu"
 }
