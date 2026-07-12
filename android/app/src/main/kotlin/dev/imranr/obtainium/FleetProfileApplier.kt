@@ -213,18 +213,24 @@ object FleetProfileApplier {
         return valueAliasToKey[prefKey]?.get(value) ?: value
     }
 
+    /**
+     * Flutter's SharedPreferences class prefixes every key with "flutter."
+     * The native applier must match this so SettingsProvider reads the values.
+     */
+    private const val FLUTTER_PREFIX = "flutter."
+
     @Suppress("DEPRECATION")
     private fun putValue(editor: SharedPreferences.Editor, key: String, value: Any?) {
+        val prefixedKey = FLUTTER_PREFIX + key
         when (value) {
-            is Boolean -> editor.putBoolean(key, value)
-            is String -> editor.putString(key, value)
-            is Int -> editor.putInt(key, value)
-            is Long -> editor.putLong(key, value)
-            is Double -> editor.putFloat(key, value.toFloat())
-            is Float -> editor.putFloat(key, value)
+            is Boolean -> editor.putBoolean(prefixedKey, value)
+            is String -> editor.putString(prefixedKey, value)
+            is Int -> editor.putInt(prefixedKey, value)
+            is Long -> editor.putLong(prefixedKey, value)
+            is Double -> editor.putFloat(prefixedKey, value.toFloat())
+            is Float -> editor.putFloat(prefixedKey, value)
             is JSONArray -> {
-                // Stored as JSON string; Flutter deep-link path handles List<String> encoding.
-                editor.putString(key, value.toString())
+                editor.putString(prefixedKey, value.toString())
             }
             else -> throw IllegalArgumentException("Unsupported type: ${value?.javaClass?.simpleName}")
         }
