@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
+import java.io.File
 
 /**
  * Exported, themeless Activity that applies a fleet profile to Obtainium's
@@ -15,30 +16,23 @@ import android.widget.Toast
  * file URI, or a content URI, applies the settings to Obtainium's default
  * SharedPreferences via [FleetProfileApplier], and exits.
  *
+ * The result is returned via [setResult] (RESULT_OK / RESULT_CANCELED)
+ * AND written as a JSON file alongside the profile so orchestrators can
+ * verify success via `adb shell cat`.
+ *
  * ## Usage
  *
- *   adb shell am start \
+ *   adb shell am start -W \
  *     -a dev.imranr.obtainium.action.APPLY_FLEET_PROFILE \
- *     -e profile_path /sdcard/Download/obtainium-fleet.json \
+ *     -e profile_path /data/local/tmp/obtainium-fleet.json \
  *     dev.imranr.obtainium/.FleetProfileActivity
  *
- * Or with a file URI:
- *
- *   adb shell am start \
- *     -a dev.imranr.obtainium.action.APPLY_FLEET_PROFILE \
- *     -d file:///sdcard/Download/obtainium-fleet.json \
- *     dev.imranr.obtainium/.FleetProfileActivity
- *
- * Or with a content URI:
- *
- *   adb shell am start \
- *     -a dev.imranr.obtainium.action.APPLY_FLEET_PROFILE \
- *     -d content://media/external/downloads/1234 \
- *     dev.imranr.obtainium/.FleetProfileActivity
+ *   adb shell cat /data/local/tmp/obtainium-fleet-result.json
  *
  * Options:
- *   -e silent true          — suppress result Toast
- *   -e deep_link "...""      — also launch a Flutter deep-link after applying
+ *   -e silent true      — suppress result Toast
+ *   -e result_path ...   — override result JSON path
+ *   -e deep_link "...""   — also launch a Flutter deep-link after applying
  */
 class FleetProfileActivity : Activity() {
 
@@ -46,8 +40,10 @@ class FleetProfileActivity : Activity() {
         const val ACTION_APPLY_FLEET_PROFILE =
             "dev.imranr.obtainium.action.APPLY_FLEET_PROFILE"
         const val EXTRA_PROFILE_PATH = "profile_path"
+        const val EXTRA_RESULT_PATH = "result_path"
         const val EXTRA_SILENT = "silent"
         const val EXTRA_DEEP_LINK = "deep_link"
+        const val DEFAULT_RESULT_FILE = "obtainium-fleet-result.json"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,6 +103,8 @@ class FleetProfileActivity : Activity() {
             } catch (_: Exception) { /* best-effort */ }
         }
 
+        writeResultFile(result)
+
         setResult(if (result.success) RESULT_OK else RESULT_CANCELED)
         finish()
     }
@@ -121,5 +119,29 @@ class FleetProfileActivity : Activity() {
         }
         // 2) data URI (file:// or content://)
         return intent.data
+    }
+
+    /**
+     * Write a JSON result file so orchestrators can verify success without
+     * needing run-as to read FlutterSharedPreferences.xml.
+     *
+     * The result path is determined by, in order:
+     * 1) result_path intent extra
+     * 2) profile_path's parent directory + DEFAULT_RESULT_FILE
+     * 3) /data/local/tmp/DEFAULT_RESULT_FILE
+     */
+    private fun writeResultFile(result: FleetProfileApplier.Result) {
+        val resultPath = intent.getStringExtra(EXTRA_RESULT_PATH)
+            ?: intent.getStringExtra(EXTRA_PROFILE_PATH)?.let { path ->
+                File(path).parent?.let { File(it, DEFAULT_RESULT_FILE).absolutePath }
+            }
+            ?: "/data/local/tmp/$DEFAULT_RESULT_FILE"
+        try {
+            File(resultPath).parentFile?.mkdirs()
+            File(resultPath).writeText(result.toJson().toString(2), Charsets.UTF_8)
+        } catch (_: Exception) {
+            // Best-effort; the setResult() and Toast already communicate
+            // the outcome to the orchestrator.
+        }
     }
 }

@@ -120,7 +120,17 @@ object FleetProfileApplier {
         val skippedCount: Int,
         val errors: List<String>,
         val message: String,
-    )
+    ) {
+        fun toJson(): JSONObject = JSONObject().apply {
+            put("success", success)
+            put("appliedCount", appliedCount)
+            put("skippedCount", skippedCount)
+            val arr = JSONArray()
+            errors.forEach { arr.put(it) }
+            put("errors", arr)
+            put("message", message)
+        }
+    }
 
     @JvmStatic
     fun applyJson(context: Context, json: String): Result {

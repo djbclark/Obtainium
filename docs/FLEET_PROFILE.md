@@ -7,28 +7,29 @@ the settings and update flows would otherwise require fragile UI automation.
 
 ## Quick start — native Activity (simple preferences)
 
-Push a profile JSON to the device and apply it in one shot — no Flutter boot needed:
+Push a profile JSON to the device and apply it in one shot — no Flutter boot needed.
+**Use `/data/local/tmp/` instead of `/sdcard/`** — on Android 11+, scoped storage
+blocks raw file reads from `/sdcard/Download/` for apps without `MANAGE_EXTERNAL_STORAGE`.
 
 ```bash
-adb push fleet_profile.json /sdcard/Download/obtainium-fleet.json
+adb push fleet_profile.json /data/local/tmp/obtainium-fleet.json
 
-adb shell am start \
+adb shell am start -W \
   -a dev.imranr.obtainium.action.APPLY_FLEET_PROFILE \
-  -e profile_path /sdcard/Download/obtainium-fleet.json \
+  -e profile_path /data/local/tmp/obtainium-fleet.json \
   dev.imranr.obtainium/.FleetProfileActivity
+
+# Verify the result:
+adb shell cat /data/local/tmp/obtainium-fleet-result.json
 ```
 
-Or with a `file://` URI:
+The `-W` flag makes `am start` block until the activity finishes and returns the
+exit code. The activity writes `obtainium-fleet-result.json` alongside the profile
+file so orchestrators can verify success without needing `run-as`.
 
-```bash
-adb shell am start \
-  -a dev.imranr.obtainium.action.APPLY_FLEET_PROFILE \
-  -d file:///sdcard/Download/obtainium-fleet.json \
-  dev.imranr.obtainium/.FleetProfileActivity
-```
-
-The activity (theme `Theme.NoDisplay` — no UI) applies the preferences and shows a
-brief Toast with the result. Pass `-e silent true` to suppress the Toast.
+The activity (theme `Theme.NoDisplay` — no UI) shows a brief Toast with the
+result. Pass `-e silent true` to suppress the Toast. Pass `-e result_path ...`
+to override where the result JSON is written.
 
 ## Quick start — deep link (full profile + actions)
 
@@ -262,6 +263,9 @@ update triggers, `categories` as a proper JSON map), use:
 - The `obtainium://update` action cannot handle installer dialogs that pop up
   during the install process — those require either Shizuku silent install, or
   external tooling to handle the dialog.
+- **Android 11+ scoped storage:** apps without `MANAGE_EXTERNAL_STORAGE` cannot
+  read files from `/sdcard/Download/` via raw `file://` paths. Push fleet profiles
+  to `/data/local/tmp/` (no restrictions) or use `content://` URIs instead.
 
 ## See also
 
