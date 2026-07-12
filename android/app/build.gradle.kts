@@ -128,7 +128,6 @@ android.applicationVariants.configureEach {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
-    implementation("androidx.datastore:datastore-preferences:1.1.7")
 }
 
 flutter {
