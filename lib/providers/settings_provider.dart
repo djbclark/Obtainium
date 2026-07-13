@@ -20,7 +20,7 @@ import 'package:shared_storage/shared_storage.dart' as saf;
 
 const String obtainiumTempId = 'imranr98_obtainium_github.com';
 const String obtainiumId = 'dev.imranr.obtainium';
-const String obtainiumUrl = 'https://github.com/ImranR98/Obtainium';
+const String obtainiumUrl = 'https://github.com/djbclark/Obtainium';
 const Color obtainiumThemeColor = Color(0xFF6438B5);
 
 String lowerCaseUnlessLang(String str, String lang) =>
