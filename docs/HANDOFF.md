@@ -7,7 +7,7 @@ This is a fork of [ImranR98/Obtainium](https://github.com/ImranR98/Obtainium) at
 orchestration tools like [stayturgid](https://github.com/djbclark/stayturgid) can
 manage devices without fragile UI automation.
 
-**Latest release:** `v1.6.5` (debug9) — see [GitHub Releases](https://github.com/djbclark/Obtainium/releases)
+**Latest release:** `v1.6.6` (debug10) — see [GitHub Releases](https://github.com/djbclark/Obtainium/releases)
 
 ---
 
@@ -24,21 +24,21 @@ obtainium-v{version}-stayturgid-debug{n}-{abi}.apk
 | Component | Meaning | Example |
 |-----------|---------|---------|
 | `obtainium` | App name (upstream convention) | `obtainium` |
-| `v{version}` | Upstream version from `pubspec.yaml` | `v1.6.5` |
+| `v{version}` | Upstream version from `pubspec.yaml` | `v1.6.6` |
 | `stayturgid` | Fork marker differentiating from upstream | `stayturgid` |
-| `debug{n}` | **Sequential** debug build number | `debug9` |
+| `debug{n}` | **Sequential** debug build number | `debug10` |
 | `{abi}` | `arm64-v8a`, `armeabi-v7a`, `x86_64`, or `universal` | `arm64-v8a` |
 | `.apk` | Extension | `.apk` |
 
-**Full example:** `obtainium-v1.6.5-stayturgid-debug9-arm64-v8a.apk`
+**Full example:** `obtainium-v1.6.6-stayturgid-debug10-arm64-v8a.apk`
 
 ### Debug build number rules
 
 - The `debug{n}` number is a **sequential counter per fork** — never reset per version.
 - Each time APKs are rebuilt (bug fix, new feature), increment `n`.
-- The current counter is `debug9` for v1.6.5. The next rebuild uses `debug10`.
-- Prior releases: v1.6.3 = `debug1`, v1.6.4 = `debug2`, v1.6.5 = `debug3` → `debug9`.
-- The tag (`v1.6.5`) is force-moved to the latest fix commit when rebuilding the same version.
+- The current counter is `debug10` for v1.6.6. The next rebuild uses `debug11`.
+- Prior releases: v1.6.3 = `debug1`, v1.6.4 = `debug2`, v1.6.5 = `debug3`→`debug9`, v1.6.6 = `debug10`.
+- Tags are created fresh per version; same-version rebuilds force-move the tag.
 
 ### Release process
 
@@ -75,6 +75,7 @@ gh release create v1.6.5 --title "..." --notes "..." \
 | v1.6.3 | `v1.6.3` | `debug1` | Fleet profile system (native Activity, deep-links, docs) |
 | v1.6.4 | `v1.6.4` | `debug2` | Silent-only install, import feedback, per-app settings |
 | v1.6.5 | `v1.6.5` | `debug9` | Broadcast results, grantFirst, result file, key prefix fixes |
+| v1.6.6 | `v1.6.6` | `debug10` | Fix self-update URL to fork (djbclark/Obtainium) |
 
 ---
 
@@ -189,6 +190,7 @@ adb shell am start \
 - **Legacy path (not DataStore):** SettingsProvider uses the legacy `SharedPreferences.getInstance()` → `LegacySharedPreferencesPlugin` → XML file. Do not try to write to DataStore/protobuf.
 - **Profile location:** Use `/data/local/tmp/` (no scoped storage restrictions). Do NOT use `/sdcard/Download/` on Android 11+.
 - **Result verification:** The native activity writes `obtainium-fleet-result.json` alongside the profile. Use `-e result_path` to override. Use `am start -W` (wait flag) to block until the activity returns its exit code.
+- **Self-update URL:** `obtainiumUrl` at `settings_provider.dart:23` was changed from `ImranR98/Obtainium` to `djbclark/Obtainium`. On first run, Obtainium auto-adds itself as a tracked app using this URL. Without this fix, self-update checks fail against upstream's incompatible APK naming.
 - **APK naming:** `obtainium-v{version}-stayturgid-debug{n}-{abi}.apk`. `debug{n}` is sequential across all versions, never reset. All releases are `draft=false`.
 - **Build toolchain:** JDK 21 required (JDK 25 fails with "25.0.3" error). NDK `29.0.14206865`. No `key.properties` — APKs are unsigned.
 
@@ -274,7 +276,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 flutter build apk --split-per-abi --flavo
 | `lib/pages/home.dart` | 930+ | Deep-link router: `handleUpdateLink`, `handleSettingsLink`, `handleProfileLink`, `interpretLink` (appSettings, profile, apps, update, settings) |
 | `lib/providers/fleet_profile_applier.dart` | 340 | Dart applier: async `applyMap` with `grantFirst`, `_resolveValue`, `FleetProfileResult` |
 | `lib/providers/headless_result.dart` | 90 | File + broadcast intent sender |
-| `lib/providers/settings_provider.dart` | 768 | Uses legacy `SharedPreferences.getInstance()` (NOT DataStore); all settings getters/setters |
+| `lib/providers/settings_provider.dart` | 768 | Uses legacy `SharedPreferences.getInstance()` (NOT DataStore); all settings getters/setters. `obtainiumUrl` at line 23 changed to `djbclark/Obtainium` for self-update. |
 | `assets/fleet_profile_default.json` | 12 | Default profile |
 | `docs/FLEET_PROFILE.md` | 270+ | Full docs including scoped storage guidance |
-| `pubspec.yaml` | 94 | Version `1.6.5+2344`; Flutter `>=3.44.0` |
+| `pubspec.yaml` | 94 | Version `1.6.6+2345`; Flutter `>=3.44.0` |
