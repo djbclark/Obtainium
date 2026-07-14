@@ -14,8 +14,6 @@ import 'package:obtainium/pages/app.dart';
 import 'package:obtainium/pages/apps.dart';
 import 'package:obtainium/pages/settings.dart';
 import 'package:obtainium/providers/apps_provider.dart';
-import 'package:obtainium/providers/fleet_profile_applier.dart';
-import 'package:obtainium/providers/headless_result.dart';
 import 'package:obtainium/providers/logs_provider.dart';
 import 'package:obtainium/providers/notifications_provider.dart';
 import 'package:obtainium/providers/settings_provider.dart';
@@ -235,23 +233,11 @@ class _HomePageState extends State<HomePage> {
       appsPageKey.currentState?.openAppById(appId);
     }
 
-    Future<void> maybeExit(Uri uri, {
-      required String action,
-      bool success = true,
-      String message = '',
-      int? count,
-    }) async {
+    Future<void> maybeExit(Uri uri) async {
       final headless = uri.queryParameters['headless'] == 'true' ||
           uri.queryParameters['exit'] == 'true';
       if (headless && mounted) {
-        unawaited(
-          HeadlessResult.write(
-            action: action,
-            success: success,
-            message: message,
-            count: count,
-          ),
-        );
+        // Give any message a moment to render before leaving the app.
         await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) {
           SystemNavigator.pop();
@@ -359,7 +345,7 @@ class _HomePageState extends State<HomePage> {
       }
 
       if (headless) {
-        await maybeExit(uri, action: 'update');
+        await maybeExit(uri);
       }
     }
 
@@ -420,60 +406,7 @@ class _HomePageState extends State<HomePage> {
       } else {
         throw ObtainiumError(tr('unknown'));
       }
-      await maybeExit(uri, action: 'settings');
-    }
-
-    Future<void> handleProfileLink(Uri uri) async {
-      final headless = uri.queryParameters['headless'] == 'true' ||
-          uri.queryParameters['exit'] == 'true';
-
-      await waitUntil(
-        () => !appsProvider.loadingApps,
-        interval: const Duration(milliseconds: 10),
-        maxAttempts: 500,
-      );
-
-      FleetProfileResult result;
-      final encoded = uri.queryParameters['profile'];
-      final fileUrl = uri.queryParameters['url'];
-
-      if (encoded != null) {
-        final json = utf8.decode(base64Url.decode(encoded));
-        result = await FleetProfileApplier.applyJson(
-          settingsProvider,
-          json: json,
-          appsProvider: appsProvider,
-        );
-      } else if (fileUrl != null) {
-        final fileUri = Uri.parse(fileUrl);
-        if (fileUri.scheme == 'file') {
-          result = await FleetProfileApplier.applyFromFile(
-            settingsProvider,
-            path: fileUri.toFilePath(),
-            appsProvider: appsProvider,
-          );
-        } else {
-          throw ObtainiumError('Only file:// URIs are supported for profile URL');
-        }
-      } else {
-        throw ObtainiumError(tr('invalidInput'));
-      }
-
-      unawaited(
-        LogsProvider().add(
-          'Fleet profile: ${result.message}',
-          level: result.success ? LogLevel.info : LogLevel.error,
-        ),
-      );
-
-      if (mounted) {
-        showMessage(result.message, context);
-      }
-
-      if (headless) {
-        await maybeExit(uri, action: 'profile', message: result.message,
-            success: result.success, count: result.appliedCount);
-      }
+      await maybeExit(uri);
     }
 
     Future<void> interpretLink(Uri uri) async {
@@ -588,16 +521,12 @@ class _HomePageState extends State<HomePage> {
             );
           }
           if (importHeadless) {
-            await maybeExit(uri, action: 'import',
-                success: count > 0, message: 'Imported $count apps',
-                count: count);
+            await maybeExit(uri);
           }
         } else if (action == 'update') {
           await handleUpdateLink(uri);
         } else if (action == 'settings') {
           await handleSettingsLink(uri);
-        } else if (action == 'profile') {
-          await handleProfileLink(uri);
         } else if (action == 'appsettings') {
           final headless = uri.queryParameters['headless'] == 'true' ||
               uri.queryParameters['exit'] == 'true';
@@ -644,9 +573,7 @@ class _HomePageState extends State<HomePage> {
           }
 
           if (headless) {
-            await maybeExit(uri, action: 'appSettings',
-                success: true, message: 'Updated ${existing.name}',
-                count: 1);
+            await maybeExit(uri);
           }
         } else {
           throw ObtainiumError(tr('unknown'));
