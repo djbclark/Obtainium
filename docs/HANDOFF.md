@@ -280,3 +280,79 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 flutter build apk --split-per-abi --flavo
 | `assets/fleet_profile_default.json` | 12 | Default profile |
 | `docs/FLEET_PROFILE.md` | 270+ | Full docs including scoped storage guidance |
 | `pubspec.yaml` | 94 | Version `1.6.6+2345`; Flutter `>=3.44.0` |
+
+---
+
+## Upstream PR plan
+
+The following changes are generally useful (not fleet-specific) and suitable
+for submitting to ImranR98/Obtainium. Each PR should thank the upstream for the
+project and frame the feature as automation-friendly (Tasker, MacroDroid, ADB,
+browser links), not fleet-orchestration.
+
+### PR 1: Deep-link actions for update check, settings, and headless exit
+
+**Files:** `lib/pages/home.dart` (~80 lines additive, no existing code changed)
+
+**What to submit:**
+- `handleUpdateLink` (±45 lines): `obtainium://update/all?autoInstall=true&headless=true`
+  with params `appId`, `forceAll`, `autoInstall`, `headless`/`exit`, `silentOnly`
+- `handleSettingsLink` (±35 lines): `obtainium://settings/installer?mode=shizuku`,
+  `obtainium://settings/background?enabled=true&wifiOnly=true`,
+  `obtainium://settings/updates?interval=720&checkOnStart=true`
+- `maybeExit(Uri uri)` helper (±8 lines): reads `headless`/`exit` param, calls
+  `SystemNavigator.pop()` after 500ms delay to give snackbar time to render
+- New `else if` branches in `interpretLink()` for `action == 'update'` and
+  `action == 'settings'`
+
+**What to strip before submitting:**
+- Remove `fleet_profile_applier.dart` import (fork-only)
+- Remove `headless_result.dart` import (fork-only)
+- Simplify `maybeExit` to just take `Uri uri` — strip `action`/`success`/`message`/`count`
+  named params since `HeadlessResult.write()` doesn't exist in upstream
+- Remove `maybeExit` calls with extra params; replace with simple `maybeExit(uri)`
+- Keep `_filterSilent` helper — uses `canInstallSilentlyInBackground` which is
+  an upstream method on AppsProvider
+
+**Code review notes:**
+- `silentOnly` param defaults to off; backward-compatible
+- `autoInstall` defaults to true when path is `/all` or `/update`, false otherwise
+- `forceAll` defaults to true (string comparison against "false")
+- `headless` defaults to true for `/all` path unless explicitly set to `"false"`
+- `_filterSilent` uses `Future.wait` — O(n) concurrent checks, fine for typical sizes
+- `appNavigatorKey.currentContext` captured before `unawaited` — safe
+- Duplicated logic refactored into single flow in commit `6212825`
+
+### PR 2: Auto-confirm catalog import (`?confirm=true`)
+
+**Files:** `lib/pages/home.dart` (~8 lines)
+
+**What to submit:**
+- Guard around the existing `showDialog` call in the `app`/`apps` action:
+  `if (!autoConfirm) { if (await showDialog(...) == null) return; }`
+- Read `importHeadless` from URI params for optional exit after import
+
+**Code review notes:**
+- `confirm=true` is opt-in — no behavior change for manual users
+- Depends on PR 1's `maybeExit` for the exit path. If submitted independently,
+  inline the exit: `await Future.delayed(500ms); SystemNavigator.pop();`
+- Guard pattern uses early return from `showDialog` cancel — clean, idiomatic
+
+### PR 3: Dropped — NDK version change
+
+The `android/app/build.gradle.kts` NDK version change (`28.2.13676358` →
+`29.0.14206865`) is a local build environment issue, not a code bug.
+Upstream likely has NDK 28.x in their CI pipeline. Not submitting.
+
+### Fleet-specific code (stays fork-only)
+
+| Feature | Reason |
+|---------|--------|
+| `obtainium://profile` deep-link | Depends on `fleet_profile_applier.dart` |
+| `obtainium://appSettings` deep-link | Per-app config via deep-link; narrow use case |
+| `FleetProfileActivity.kt` | Exported Activity for MDM/fleet orchestration |
+| `FleetProfileApplier.kt` (Kotlin) | Native applier companion |
+| `fleet_profile_applier.dart` (Dart) | Dart applier with `grantFirst` |
+| `headless_result.dart` | Broadcast + file result for fleet orchestration |
+| `grantFirst` / `_meta` flags | Depends on Shizuku plugin internals |
+| `obtainiumUrl` change | Points to fork, not upstream |
