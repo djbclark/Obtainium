@@ -298,53 +298,22 @@ class _HomePageState extends State<HomePage> {
         return results.whereType<String>().toList();
       }
 
-      if (!isAll && specificIds != null && specificIds.isNotEmpty) {
-        final updates = await appsProvider
-            .checkUpdates(specificIds: specificIds, forceAll: forceAll)
-            .catchError((e) {
-              unawaited(
-                LogsProvider().add(
-                  'Deep-link update check failed: $e',
-                  level: LogLevel.error,
-                ),
-              );
-              return <App>[];
-            });
-        if (autoInstall && updates.isNotEmpty) {
-          var installIds = updates.map((a) => a.id).toList();
-          installIds = await _filterSilent(installIds);
-          if (installIds.isNotEmpty) {
-            unawaited(
-              appsProvider
-                  .downloadAndInstallLatestApps(
-                    installIds,
-                    appNavigatorKey.currentContext,
-                    notificationsProvider: context.read<NotificationsProvider>(),
-                  )
-                  .catchError((e) {
-                    unawaited(
-                      LogsProvider().add(
-                        'Deep-link install failed: $e',
-                        level: LogLevel.error,
-                      ),
-                    );
-                    return <String>[];
-                  }),
-            );
-          }
-        }
-        if (mounted) {
-          showMessage(
-            updates.isNotEmpty
-                ? '${tr('updatesAvailable')}: ${updates.length}'
-                : tr('noNewUpdates'),
-            context,
-          );
-        }
-      } else {
-        final updates = await appsProvider
-            .checkUpdates(forceAll: forceAll)
-            .catchError((e) {
+      final bool hasSpecificIds =
+          !isAll && specificIds != null && specificIds.isNotEmpty;
+
+      final updates = hasSpecificIds
+          ? await appsProvider
+              .checkUpdates(specificIds: specificIds, forceAll: forceAll)
+              .catchError((e) {
+                unawaited(
+                  LogsProvider().add(
+                    'Deep-link update check failed: $e',
+                    level: LogLevel.error,
+                  ),
+                );
+                return <App>[];
+              })
+          : await appsProvider.checkUpdates(forceAll: forceAll).catchError((e) {
               unawaited(
                 LogsProvider().add(
                   'Deep-link update check failed: $e',
@@ -354,38 +323,39 @@ class _HomePageState extends State<HomePage> {
               return <App>[];
             });
 
-        if (autoInstall) {
-          var ids = appsProvider.findAppIdsWithPendingUpdates(installedOnly: true);
-          ids = await _filterSilent(ids);
-          if (ids.isNotEmpty) {
-            unawaited(
-              appsProvider
-                  .downloadAndInstallLatestApps(
-                    ids,
-                    appNavigatorKey.currentContext,
-                    notificationsProvider: context.read<NotificationsProvider>(),
-                  )
-                  .catchError((e) {
-                    unawaited(
-                      LogsProvider().add(
-                        'Deep-link bulk install failed: $e',
-                        level: LogLevel.error,
-                      ),
-                    );
-                    return <String>[];
-                  }),
-            );
-          }
-        }
-
-        if (mounted) {
-          showMessage(
-            updates.isNotEmpty
-                ? '${tr('updatesAvailable')}: ${updates.length}'
-                : tr('noNewUpdates'),
-            context,
+      if (autoInstall) {
+        var ids = hasSpecificIds
+            ? updates.map((a) => a.id).toList()
+            : appsProvider.findAppIdsWithPendingUpdates(installedOnly: true);
+        ids = await _filterSilent(ids);
+        if (ids.isNotEmpty) {
+          unawaited(
+            appsProvider
+                .downloadAndInstallLatestApps(
+                  ids,
+                  appNavigatorKey.currentContext,
+                  notificationsProvider: context.read<NotificationsProvider>(),
+                )
+                .catchError((e) {
+                  unawaited(
+                    LogsProvider().add(
+                      'Deep-link install failed: $e',
+                      level: LogLevel.error,
+                    ),
+                  );
+                  return <String>[];
+                }),
           );
         }
+      }
+
+      if (mounted) {
+        showMessage(
+          updates.isNotEmpty
+              ? '${tr('updatesAvailable')}: ${updates.length}'
+              : tr('noNewUpdates'),
+          context,
+        );
       }
 
       if (headless) {
