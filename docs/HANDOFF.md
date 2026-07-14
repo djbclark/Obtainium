@@ -292,6 +292,9 @@ browser links), not fleet-orchestration.
 
 ### PR 1: Deep-link actions for update check, settings, and headless exit
 
+**PR:** [#3071](https://github.com/ImranR98/Obtainium/pull/3071) (draft)
+**Branch:** `pr/deep-link-actions`
+
 **Files:** `lib/pages/home.dart` (~80 lines additive, no existing code changed)
 
 **What to submit:**
@@ -324,6 +327,10 @@ browser links), not fleet-orchestration.
 - Duplicated logic refactored into single flow in commit `6212825`
 
 ### PR 2: Auto-confirm catalog import (`?confirm=true`)
+
+**PR:** [#3072](https://github.com/ImranR98/Obtainium/pull/3072) (draft)
+**Branch:** `pr/confirm-import`
+**Depends on:** #3071
 
 **Files:** `lib/pages/home.dart` (~8 lines)
 
