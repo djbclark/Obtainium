@@ -326,18 +326,18 @@ browser links), not fleet-orchestration.
 - `appNavigatorKey.currentContext` captured before `unawaited` — safe
 - Duplicated logic refactored into single flow in commit `6212825`
 
-### PR 2: Withdrawn — needs security gating
+### PR 2 (resubmitted): Auto-confirm import gated by trusted caller
 
-The `confirm=true` param bypasses the import dialog. For browser-based phishing,
-this is exploitable. For ADB/orchestrator use, the caller already has device
-control. The feature is kept in our fork for fleet use (stayturgid calls via ADB)
-but shouldn't be proposed upstream without a gating mechanism.
+**PR:** [#3073](https://github.com/ImranR98/Obtainium/pull/3073) (draft)
+**Branch:** `pr/confirm-import-trusted`
+**Depends on:** #3071
 
-**Options for future resubmission:**
-- Check calling UID in `MainActivity.kt` — only allow `confirm=true` from ADB shell
-  (`Binder.getCallingUid() == SHELL_UID`) or root
-- Settings toggle `allowHeadlessAutomation` (off by default) — opt-in in Settings UI
-- Permission-protected intent extra — only trusted callers can pass it
+Replaces the withdrawn #3072. `confirm=true` now only takes effect when the
+intent came from a privileged caller (ADB shell / `am start`), detected via
+`Activity.referrer == null` in `MainActivity.kt`. Browser links always set a
+non-null referrer, so phishing links can't bypass the dialog. When privileged,
+`MainActivity.kt` appends `confirmedBy=system` to the URI — Dart checks for this
+marker.
 
 **Files:** `lib/pages/home.dart` (~8 lines)
 

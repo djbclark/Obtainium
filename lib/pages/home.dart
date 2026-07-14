@@ -449,7 +449,8 @@ class _HomePageState extends State<HomePage> {
         } else if (action == 'app' || action == 'apps') {
           final dataStr = Uri.decodeComponent(data);
           final autoConfirm =
-              uri.queryParameters['confirm'] == 'true';
+              uri.queryParameters['confirm'] == 'true' &&
+              uri.queryParameters['confirmedBy'] == 'system';
           final importHeadless = uri.queryParameters['headless'] == 'true' ||
               uri.queryParameters['exit'] == 'true';
 
